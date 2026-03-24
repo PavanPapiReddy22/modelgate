@@ -1,20 +1,179 @@
-"""Gemini adapter — stub implementation (lower priority)."""
+"""Gemini adapter — Google Gemini REST API with tool-call normalization and SSE streaming."""
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator
 
-from unifai.types import ContentBlock, Message, Response, Tool, Usage
+import httpx
+
+from unifai.errors import StreamingError, map_http_status
+from unifai.types import (
+    ContentBlock,
+    ContentType,
+    FinishReason,
+    Message,
+    Response,
+    Role,
+    Tool,
+    Usage,
+)
 
 from .base import BaseProvider
 
+_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+_FINISH_REASON_MAP: dict[str, FinishReason] = {
+    "STOP": FinishReason.STOP,
+    "MAX_TOKENS": FinishReason.LENGTH,
+    "SAFETY": FinishReason.STOP,
+    "RECITATION": FinishReason.STOP,
+    "OTHER": FinishReason.ERROR,
+    "MALFORMED_FUNCTION_CALL": FinishReason.ERROR,
+    "FINISH_REASON_UNSPECIFIED": FinishReason.STOP,
+}
+
 
 class GeminiAdapter(BaseProvider):
-    """Adapter for the Google Gemini API. Currently a stub."""
+    """Adapter for the Google Gemini REST API (generativelanguage.googleapis.com)."""
 
     def __init__(self, api_key: str | None = None) -> None:
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+
+    # ── URL helpers (overridden by VertexAdapter) ────────────────────────
+
+    def _chat_url(self, model: str) -> str:
+        return f"{_GEMINI_API_URL}/models/{model}:generateContent?key={self._api_key}"
+
+    def _stream_url(self, model: str) -> str:
+        return f"{_GEMINI_API_URL}/models/{model}:streamGenerateContent?key={self._api_key}&alt=sse"
+
+    def _headers(self) -> dict[str, str]:
+        return {"Content-Type": "application/json"}
+
+    # ── Message conversion ───────────────────────────────────────────────
+
+    def _build_contents(self, messages: list[Message]) -> list[dict[str, object]]:
+        """Convert canonical Messages to Gemini contents array."""
+        contents: list[dict[str, object]] = []
+        for msg in messages:
+            contents.append(self._convert_message(msg))
+        return contents
+
+    def _convert_message(self, msg: Message) -> dict[str, object]:
+        """Convert a single canonical Message to Gemini Content format."""
+        role = "model" if msg.role == Role.ASSISTANT else "user"
+
+        if isinstance(msg.content, str):
+            return {"role": role, "parts": [{"text": msg.content}]}
+
+        parts: list[dict[str, object]] = []
+
+        # TOOL role → functionResponse parts
+        if msg.role == Role.TOOL:
+            for block in msg.content:
+                parts.append({
+                    "functionResponse": {
+                        "name": block.tool_name or block.tool_call_id or "",
+                        "response": {"result": block.tool_result_content or ""},
+                    }
+                })
+            return {"role": "user", "parts": parts}
+
+        # Regular content blocks
+        for block in msg.content:
+            if block.type == ContentType.TEXT:
+                parts.append({"text": block.text or ""})
+            elif block.type == ContentType.TOOL_USE:
+                parts.append({
+                    "functionCall": {
+                        "name": block.tool_name or "",
+                        "args": block.tool_input or {},
+                    }
+                })
+
+        return {"role": role, "parts": parts}
+
+    def _build_tools(self, tools: list[Tool]) -> list[dict[str, object]]:
+        """Convert canonical Tool list to Gemini functionDeclarations format."""
+        declarations = []
+        for tool in tools:
+            declarations.append({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        name: {
+                            k: v
+                            for k, v in param.model_dump().items()
+                            if v is not None
+                        }
+                        for name, param in tool.parameters.items()
+                    },
+                    "required": tool.required,
+                },
+            })
+        return [{"functionDeclarations": declarations}]
+
+    # ── Response parsing ─────────────────────────────────────────────────
+
+    def _parse_response(self, data: dict[str, object], model: str) -> Response:
+        """Parse a Gemini generateContent response into canonical Response."""
+        candidates = data.get("candidates", [])
+        candidate = candidates[0] if candidates else {}  # type: ignore[index]
+
+        content_blocks = self._parse_parts(candidate)
+
+        finish_reason_str = str(candidate.get("finishReason", "STOP"))  # type: ignore[union-attr]
+        finish_reason = _FINISH_REASON_MAP.get(finish_reason_str, FinishReason.STOP)
+
+        # Check if any content block is a tool call → override finish reason
+        if any(b.type == ContentType.TOOL_USE for b in content_blocks):
+            finish_reason = FinishReason.TOOL_USE
+
+        usage_meta = data.get("usageMetadata", {})
+        prompt_tokens = usage_meta.get("promptTokenCount", 0)  # type: ignore[union-attr]
+        candidates_tokens = usage_meta.get("candidatesTokenCount", 0)  # type: ignore[union-attr]
+
+        return Response(
+            id=str(data.get("responseId", "")),
+            model=model,
+            content=content_blocks,
+            usage=Usage(
+                input_tokens=prompt_tokens,
+                output_tokens=candidates_tokens,
+                total_tokens=prompt_tokens + candidates_tokens,
+            ),
+            finish_reason=finish_reason,
+        )
+
+    def _parse_parts(self, candidate: dict[str, object]) -> list[ContentBlock]:
+        """Extract ContentBlocks from a Gemini candidate's parts."""
+        content_blocks: list[ContentBlock] = []
+        content = candidate.get("content", {})  # type: ignore[union-attr]
+        parts = content.get("parts", []) if isinstance(content, dict) else []  # type: ignore[union-attr]
+
+        for part in parts:
+            if "text" in part:
+                content_blocks.append(
+                    ContentBlock(type=ContentType.TEXT, text=part["text"])
+                )
+            elif "functionCall" in part:
+                fc = part["functionCall"]
+                content_blocks.append(
+                    ContentBlock(
+                        type=ContentType.TOOL_USE,
+                        tool_call_id=fc.get("name", ""),  # Gemini has no separate ID
+                        tool_name=fc.get("name", ""),
+                        tool_input=fc.get("args", {}),
+                    )
+                )
+
+        return content_blocks
+
+    # ── Public API ───────────────────────────────────────────────────────
 
     async def chat(
         self,
@@ -26,7 +185,31 @@ class GeminiAdapter(BaseProvider):
         temperature: float = 1.0,
         **kwargs: object,
     ) -> Response:
-        raise NotImplementedError("GeminiAdapter.chat() is not yet implemented")
+        payload: dict[str, object] = {
+            "contents": self._build_contents(messages),
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": temperature,
+            },
+        }
+        if system:
+            payload["system_instruction"] = {"parts": [{"text": system}]}
+        if tools:
+            payload["tools"] = self._build_tools(tools)
+
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    self._chat_url(model),
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=120.0,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise map_http_status(exc.response.status_code, exc.response.text) from exc
+
+        return self._parse_response(resp.json(), model)
 
     async def stream(
         self,
@@ -38,6 +221,91 @@ class GeminiAdapter(BaseProvider):
         temperature: float = 1.0,
         **kwargs: object,
     ) -> AsyncIterator[ContentBlock | Usage]:
-        raise NotImplementedError("GeminiAdapter.stream() is not yet implemented")
-        if False:  # pragma: no cover
-            yield  # type: ignore[misc]
+        payload: dict[str, object] = {
+            "contents": self._build_contents(messages),
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": temperature,
+            },
+        }
+        if system:
+            payload["system_instruction"] = {"parts": [{"text": system}]}
+        if tools:
+            payload["tools"] = self._build_tools(tools)
+
+        # Buffers for accumulating function calls across stream chunks
+        tool_call_buffers: list[dict[str, object]] = []
+        usage_prompt = 0
+        usage_candidates = 0
+
+        async with httpx.AsyncClient() as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    self._stream_url(model),
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=120.0,
+                ) as resp:
+                    resp.raise_for_status()
+
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # Extract usage metadata
+                        usage_meta = data.get("usageMetadata", {})
+                        if usage_meta:
+                            usage_prompt = usage_meta.get("promptTokenCount", usage_prompt)
+                            usage_candidates = usage_meta.get("candidatesTokenCount", usage_candidates)
+
+                        # Process candidates
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            continue
+
+                        candidate = candidates[0]
+                        content = candidate.get("content", {})
+                        parts = content.get("parts", []) if isinstance(content, dict) else []
+
+                        for part in parts:
+                            if "text" in part:
+                                yield ContentBlock(
+                                    type=ContentType.TEXT,
+                                    text=part["text"],
+                                )
+                            elif "functionCall" in part:
+                                fc = part["functionCall"]
+                                tool_call_buffers.append({
+                                    "name": fc.get("name", ""),
+                                    "args": fc.get("args", {}),
+                                })
+
+                    # Emit buffered tool calls at end of stream
+                    for buf in tool_call_buffers:
+                        yield ContentBlock(
+                            type=ContentType.TOOL_USE,
+                            tool_call_id=str(buf["name"]),
+                            tool_name=str(buf["name"]),
+                            tool_input=buf["args"],  # type: ignore[arg-type]
+                        )
+
+                    # Emit final usage
+                    yield Usage(
+                        input_tokens=usage_prompt,
+                        output_tokens=usage_candidates,
+                        total_tokens=usage_prompt + usage_candidates,
+                    )
+
+            except httpx.HTTPStatusError as exc:
+                raise map_http_status(exc.response.status_code, exc.response.text) from exc
+            except Exception as exc:
+                if isinstance(exc, StreamingError):
+                    raise
+                raise StreamingError(str(exc)) from exc

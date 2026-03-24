@@ -27,3 +27,4 @@ htmlcov/
 
 # Project internals (not for public repo)
 project_blueprint.md
+uv.lock

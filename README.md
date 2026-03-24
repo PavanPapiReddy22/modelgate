@@ -31,7 +31,7 @@ async def main():
     print(response.text)       # "4"
     print(response.tool_calls) # [] — same shape for ALL providers
 
-    # Streaming
+    # Streaming (yields ContentBlock chunks, then a final Usage)
     async for chunk in client.stream(
         model="openai/gpt-4o",
         messages=[{"role": "user", "content": "Tell me a story"}],
@@ -51,8 +51,8 @@ asyncio.run(main())
 | `bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0` | `BedrockAdapter` | — | ✅ Full |
 | `groq/llama-3.1-70b-versatile` | `GenericOpenAIAdapter` | `https://api.groq.com/openai/v1` | ✅ Full |
 | `ollama/mistral` | `GenericOpenAIAdapter` | `http://localhost:11434/v1` | ✅ Full |
-| `gemini/gemini-1.5-pro` | `GeminiAdapter` | — | 🚧 Stub |
-| `vertex/gemini-1.5-pro` | `VertexAdapter` | — | 🚧 Stub |
+| `gemini/gemini-2.0-flash` | `GeminiAdapter` | — | ✅ Full |
+| `vertex/gemini-2.0-flash` | `VertexAdapter` | — | ✅ Full |
 
 Any OpenAI-compatible API can be added by pointing `GenericOpenAIAdapter` at a new `base_url` — no new adapter code required.
 

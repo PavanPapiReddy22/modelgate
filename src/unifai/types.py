@@ -108,6 +108,11 @@ class Usage(BaseModel):
     output_tokens: int
     total_tokens: int
 
+    @property
+    def type(self) -> str:
+        """Sentinel so stream consumers can safely check chunk.type without isinstance."""
+        return "usage"
+
     @model_validator(mode="after")
     def _validate_total(self) -> Usage:
         """total_tokens must equal input_tokens + output_tokens."""
