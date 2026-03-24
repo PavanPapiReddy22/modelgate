@@ -73,12 +73,14 @@ class GeminiAdapter(BaseProvider):
         # TOOL role → functionResponse parts
         if msg.role == Role.TOOL:
             for block in msg.content:
-                parts.append({
-                    "functionResponse": {
-                        "name": block.tool_name or block.tool_call_id or "",
-                        "response": {"result": block.tool_result_content or ""},
-                    }
-                })
+                fr: dict[str, object] = {
+                    "name": block.tool_name or block.tool_call_id or "",
+                    "response": {"result": block.tool_result_content or ""},
+                }
+                # Include the matching id so Gemini can map result → call
+                if block.tool_call_id:
+                    fr["id"] = block.tool_call_id
+                parts.append({"functionResponse": fr})
             return {"role": "user", "parts": parts}
 
         # Regular content blocks
@@ -103,7 +105,7 @@ class GeminiAdapter(BaseProvider):
                 "name": tool.name,
                 "description": tool.description,
                 "parameters": {
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         name: {
                             k: v
@@ -162,10 +164,12 @@ class GeminiAdapter(BaseProvider):
                 )
             elif "functionCall" in part:
                 fc = part["functionCall"]
+                # Gemini 3+ returns a unique id; older models may not
+                call_id = fc.get("id") or fc.get("name", "")
                 content_blocks.append(
                     ContentBlock(
                         type=ContentType.TOOL_USE,
-                        tool_call_id=fc.get("name", ""),  # Gemini has no separate ID
+                        tool_call_id=call_id,
                         tool_name=fc.get("name", ""),
                         tool_input=fc.get("args", {}),
                     )
@@ -282,7 +286,9 @@ class GeminiAdapter(BaseProvider):
                                 )
                             elif "functionCall" in part:
                                 fc = part["functionCall"]
+                                call_id = fc.get("id") or fc.get("name", "")
                                 tool_call_buffers.append({
+                                    "id": call_id,
                                     "name": fc.get("name", ""),
                                     "args": fc.get("args", {}),
                                 })
@@ -291,7 +297,7 @@ class GeminiAdapter(BaseProvider):
                     for buf in tool_call_buffers:
                         yield ContentBlock(
                             type=ContentType.TOOL_USE,
-                            tool_call_id=str(buf["name"]),
+                            tool_call_id=str(buf["id"]),
                             tool_name=str(buf["name"]),
                             tool_input=buf["args"],  # type: ignore[arg-type]
                         )

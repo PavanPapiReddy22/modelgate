@@ -47,6 +47,7 @@ MOCK_TOOL_CALL_RESPONSE = {
                     {"text": "Let me check the weather for you."},
                     {
                         "functionCall": {
+                            "id": "fc_001",
                             "name": "get_weather",
                             "args": {"location": "NYC"},
                         }
@@ -119,6 +120,7 @@ class TestGeminiChat:
         assert resp.content[0].type == ContentType.TEXT
         assert resp.content[0].text == "Let me check the weather for you."
         assert resp.content[1].type == ContentType.TOOL_USE
+        assert resp.content[1].tool_call_id == "fc_001"
         assert resp.content[1].tool_name == "get_weather"
         assert resp.content[1].tool_input == {"location": "NYC"}
         assert isinstance(resp.content[1].tool_input, dict)
@@ -149,7 +151,7 @@ class TestGeminiMessageFormat:
                     ),
                     ContentBlock(
                         type=ContentType.TOOL_USE,
-                        tool_call_id="get_weather",
+                        tool_call_id="fc_001",
                         tool_name="get_weather",
                         tool_input={"location": "NYC"},
                     ),
@@ -160,7 +162,7 @@ class TestGeminiMessageFormat:
                 content=[
                     ContentBlock(
                         type=ContentType.TOOL_RESULT,
-                        tool_call_id="get_weather",
+                        tool_call_id="fc_001",
                         tool_name="get_weather",
                         tool_result_content="72°F and sunny",
                     )
@@ -176,12 +178,13 @@ class TestGeminiMessageFormat:
         assert assistant_msg["role"] == "model"
         assert "functionCall" in assistant_msg["parts"][1]
 
-        # Tool result → role=user with functionResponse part
+        # Tool result → role=user with functionResponse part including id
         tool_msg = sent_body["contents"][2]
         assert tool_msg["role"] == "user"
         assert "functionResponse" in tool_msg["parts"][0]
         fr = tool_msg["parts"][0]["functionResponse"]
         assert fr["name"] == "get_weather"
+        assert fr["id"] == "fc_001"
         assert fr["response"]["result"] == "72°F and sunny"
 
     @respx.mock
