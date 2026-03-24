@@ -266,3 +266,98 @@ class TestGeminiErrors:
 
         with pytest.raises(RateLimitError):
             await adapter.chat(messages=messages, model="gemini-2.0-flash")
+
+
+class TestGeminiThoughtSignature:
+    """Gemini 3 returns thoughtSignature on functionCall parts — must round-trip."""
+
+    MOCK_RESPONSE_WITH_THOUGHT_SIG = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "id": "fc_002",
+                                "name": "get_weather",
+                                "args": {"location": "SF"},
+                            },
+                            "thoughtSignature": "abc123sig==",
+                        }
+                    ],
+                    "role": "model",
+                },
+                "finishReason": "STOP",
+            }
+        ],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15,
+        },
+        "responseId": "resp-thought-sig",
+    }
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_thought_signature_captured_from_response(self) -> None:
+        """thoughtSignature must be captured into ContentBlock.thought_signature."""
+        respx.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        ).mock(
+            return_value=httpx.Response(200, json=self.MOCK_RESPONSE_WITH_THOUGHT_SIG)
+        )
+
+        adapter = GeminiAdapter(api_key="test-key")
+        messages = [Message(role=Role.USER, content="Weather in SF?")]
+        resp = await adapter.chat(
+            messages=messages, model="gemini-2.0-flash", tools=[WEATHER_TOOL]
+        )
+
+        assert resp.content[0].type == ContentType.TOOL_USE
+        assert resp.content[0].thought_signature == "abc123sig=="
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_thought_signature_passed_back_in_history(self) -> None:
+        """When serializing assistant messages, thoughtSignature must be included."""
+        route = respx.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        ).mock(return_value=httpx.Response(200, json=MOCK_TEXT_RESPONSE))
+
+        adapter = GeminiAdapter(api_key="test-key")
+        messages = [
+            Message(role=Role.USER, content="Weather?"),
+            Message(
+                role=Role.ASSISTANT,
+                content=[
+                    ContentBlock(
+                        type=ContentType.TOOL_USE,
+                        tool_call_id="fc_002",
+                        tool_name="get_weather",
+                        tool_input={"location": "SF"},
+                        thought_signature="abc123sig==",
+                    ),
+                ],
+            ),
+            Message(
+                role=Role.TOOL,
+                content=[
+                    ContentBlock(
+                        type=ContentType.TOOL_RESULT,
+                        tool_call_id="fc_002",
+                        tool_name="get_weather",
+                        tool_result_content="65°F foggy",
+                    )
+                ],
+            ),
+        ]
+        await adapter.chat(messages=messages, model="gemini-2.0-flash")
+
+        sent_body = json.loads(route.calls[0].request.content)
+        assistant_part = sent_body["contents"][1]["parts"][0]
+
+        # The functionCall part must carry thoughtSignature back
+        assert "functionCall" in assistant_part
+        assert assistant_part["thoughtSignature"] == "abc123sig=="
+

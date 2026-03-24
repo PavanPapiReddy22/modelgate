@@ -46,6 +46,8 @@ class ContentBlock(BaseModel):
     tool_input: dict[str, Any] | None = None
     # TOOL_RESULT
     tool_result_content: str | None = None
+    # Gemini 3 thought signature — opaque pass-through, other providers ignore
+    thought_signature: str | None = None
 
 
 class Message(BaseModel):

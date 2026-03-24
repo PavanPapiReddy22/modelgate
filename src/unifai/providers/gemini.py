@@ -88,12 +88,16 @@ class GeminiAdapter(BaseProvider):
             if block.type == ContentType.TEXT:
                 parts.append({"text": block.text or ""})
             elif block.type == ContentType.TOOL_USE:
-                parts.append({
+                fc_part: dict[str, object] = {
                     "functionCall": {
                         "name": block.tool_name or "",
                         "args": block.tool_input or {},
                     }
-                })
+                }
+                # Gemini 3: pass thought_signature back on the same part
+                if block.thought_signature:
+                    fc_part["thoughtSignature"] = block.thought_signature
+                parts.append(fc_part)
 
         return {"role": role, "parts": parts}
 
@@ -172,6 +176,8 @@ class GeminiAdapter(BaseProvider):
                         tool_call_id=call_id,
                         tool_name=fc.get("name", ""),
                         tool_input=fc.get("args", {}),
+                        # Gemini 3 thought signature — opaque pass-through
+                        thought_signature=part.get("thoughtSignature"),
                     )
                 )
 
