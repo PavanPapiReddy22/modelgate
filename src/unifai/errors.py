@@ -70,6 +70,8 @@ def map_http_status(status_code: int, message: str) -> UnifAIError:
     if status_code == 429:
         return RateLimitError(message)
     if status_code == 400:
+        if "API_KEY_INVALID" in message:
+            return AuthenticationError(message)
         return InvalidRequestError(message)
     if status_code >= 500:
         return ProviderError(message, status_code=status_code)
