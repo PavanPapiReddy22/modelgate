@@ -44,7 +44,7 @@ asyncio.run(main())
 
 ## Supported Providers
 
-| Model string | Adapter | Base URL override | Status |
+| Example Model string | Adapter | Base URL override | Status |
 |---|---|---|---|
 | `openai/gpt-4o` | `OpenAIAdapter` | — | ✅ Full |
 | `anthropic/claude-3-5-sonnet-20241022` | `AnthropicAdapter` | — | ✅ Full |
