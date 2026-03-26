@@ -41,12 +41,43 @@ class AnthropicAdapter(BaseProvider):
 
     # ── Helpers ──────────────────────────────────────────────────────────
 
-    def _headers(self) -> dict[str, str]:
-        return {
+    def _headers(self, beta: list[str] | None = None) -> dict[str, str]:
+        headers = {
             "Content-Type": "application/json",
             "x-api-key": self._api_key,
             "anthropic-version": _ANTHROPIC_VERSION,
         }
+        if beta:
+            headers["anthropic-beta"] = ",".join(beta)
+        return headers
+
+    def _build_thinking_config(
+        self,
+        thinking_budget: object,
+        max_tokens: int,
+        display: str | None,
+    ) -> dict[str, object] | None:
+        """Return the thinking payload dict, or None if thinking is disabled."""
+        if thinking_budget is None:
+            return None
+        if thinking_budget == "adaptive":
+            cfg: dict[str, object] = {"type": "adaptive"}
+        else:
+            if not isinstance(thinking_budget, int):
+                raise ValueError(f"thinking_budget must be an int or 'adaptive', got {thinking_budget!r}")
+            if thinking_budget < 1024:
+                raise ValueError(f"thinking_budget ({thinking_budget}) must be at least 1024")
+            if thinking_budget >= max_tokens:
+                raise ValueError(
+                    f"thinking_budget ({thinking_budget}) must be less than max_tokens ({max_tokens})"
+                )
+            cfg = {"type": "enabled", "budget_tokens": thinking_budget}
+        if display is not None:
+            # "display" controls thinking summarization ("summarized" | "omitted").
+            # Only honoured on Claude 4+ models — Sonnet 3.7 always returns full
+            # (non-summarized) thinking regardless of this field.
+            cfg["display"] = display
+        return cfg
 
     def _build_messages(self, messages: list[Message]) -> list[dict[str, object]]:
         """Convert canonical Messages to Anthropic format."""
@@ -85,6 +116,21 @@ class AnthropicAdapter(BaseProvider):
                         "id": block.tool_call_id or "",
                         "name": block.tool_name or "",
                         "input": block.tool_input or {},
+                    }
+                )
+            elif block.type == ContentType.THINKING:
+                content_blocks.append(
+                    {
+                        "type": "thinking",
+                        "thinking": block.thinking or "",
+                        "signature": block.thinking_signature or "",
+                    }
+                )
+            elif block.type == ContentType.REDACTED_THINKING:
+                content_blocks.append(
+                    {
+                        "type": "redacted_thinking",
+                        "data": block.redacted_thinking_data or "",
                     }
                 )
 
@@ -131,6 +177,21 @@ class AnthropicAdapter(BaseProvider):
                         tool_input=block.get("input", {}),  # type: ignore[union-attr]
                     )
                 )
+            elif block_type == "thinking":
+                content_blocks.append(
+                    ContentBlock(
+                        type=ContentType.THINKING,
+                        thinking=block.get("thinking", ""),  # type: ignore[union-attr]
+                        thinking_signature=block.get("signature", ""),  # type: ignore[union-attr]
+                    )
+                )
+            elif block_type == "redacted_thinking":
+                content_blocks.append(
+                    ContentBlock(
+                        type=ContentType.REDACTED_THINKING,
+                        redacted_thinking_data=block.get("data", ""),  # type: ignore[union-attr]
+                    )
+                )
 
         stop_reason = str(data.get("stop_reason", "end_turn"))
         finish_reason = _FINISH_REASON_MAP.get(stop_reason, FinishReason.STOP)
@@ -138,6 +199,7 @@ class AnthropicAdapter(BaseProvider):
         usage_data = data.get("usage", {})
         input_tokens = usage_data.get("input_tokens", 0)  # type: ignore[union-attr]
         output_tokens = usage_data.get("output_tokens", 0)  # type: ignore[union-attr]
+        thinking_tokens = usage_data.get("thinking_input_tokens", 0)  # type: ignore[union-attr]
 
         return Response(
             id=str(data.get("id", "")),
@@ -147,6 +209,7 @@ class AnthropicAdapter(BaseProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=input_tokens + output_tokens,
+                thinking_tokens=thinking_tokens,
             ),
             finish_reason=finish_reason,
         )
@@ -163,22 +226,37 @@ class AnthropicAdapter(BaseProvider):
         temperature: float = 1.0,
         **kwargs: object,
     ) -> Response:
+        thinking_budget = kwargs.get("thinking_budget")
+        thinking_display = kwargs.get("thinking_display")
+        interleaved_thinking = bool(kwargs.get("interleaved_thinking", False))
+
+        thinking_cfg = self._build_thinking_config(thinking_budget, max_tokens, thinking_display)  # type: ignore[arg-type]
+
         payload: dict[str, object] = {
             "model": model,
             "messages": self._build_messages(messages),
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+        # Anthropic rejects temperature when thinking is enabled
+        if thinking_cfg is None:
+            payload["temperature"] = temperature
+        else:
+            payload["thinking"] = thinking_cfg
+
         if system:
             payload["system"] = system
         if tools:
             payload["tools"] = self._build_tools(tools)
 
+        beta: list[str] = []
+        if interleaved_thinking:
+            beta.append("interleaved-thinking-2025-05-14")
+
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
                     f"{_ANTHROPIC_API_URL}/messages",
-                    headers=self._headers(),
+                    headers=self._headers(beta or None),
                     json=payload,
                     timeout=120.0,
                 )
@@ -198,24 +276,39 @@ class AnthropicAdapter(BaseProvider):
         temperature: float = 1.0,
         **kwargs: object,
     ) -> AsyncIterator[ContentBlock | Usage]:
+        thinking_budget = kwargs.get("thinking_budget")
+        thinking_display = kwargs.get("thinking_display")
+        interleaved_thinking = bool(kwargs.get("interleaved_thinking", False))
+
+        thinking_cfg = self._build_thinking_config(thinking_budget, max_tokens, thinking_display)  # type: ignore[arg-type]
+
         payload: dict[str, object] = {
             "model": model,
             "messages": self._build_messages(messages),
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "stream": True,
         }
+        # Anthropic rejects temperature when thinking is enabled
+        if thinking_cfg is None:
+            payload["temperature"] = temperature
+        else:
+            payload["thinking"] = thinking_cfg
+
         if system:
             payload["system"] = system
         if tools:
             payload["tools"] = self._build_tools(tools)
+
+        beta: list[str] = []
+        if interleaved_thinking:
+            beta.append("interleaved-thinking-2025-05-14")
 
         async with httpx.AsyncClient() as client:
             try:
                 async with client.stream(
                     "POST",
                     f"{_ANTHROPIC_API_URL}/messages",
-                    headers=self._headers(),
+                    headers=self._headers(beta or None),
                     json=payload,
                     timeout=120.0,
                 ) as resp:
@@ -223,10 +316,15 @@ class AnthropicAdapter(BaseProvider):
 
                     # Buffers for streaming
                     current_block_type: str | None = None
-                    text_buffer: str = ""
                     tool_id: str = ""
                     tool_name: str = ""
                     tool_input_json: str = ""
+                    thinking_buffer: str = ""
+                    thinking_signature: str = ""
+                    redacted_thinking_data: str = ""
+                    stream_input_tokens: int = 0
+                    stream_output_tokens: int = 0
+                    stream_thinking_tokens: int = 0
 
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
@@ -247,8 +345,11 @@ class AnthropicAdapter(BaseProvider):
                                 tool_id = block.get("id", "")
                                 tool_name = block.get("name", "")
                                 tool_input_json = ""
-                            elif current_block_type == "text":
-                                text_buffer = block.get("text", "")
+                            elif current_block_type == "thinking":
+                                thinking_buffer = ""
+                                thinking_signature = ""
+                            elif current_block_type == "redacted_thinking":
+                                redacted_thinking_data = block.get("data", "")  # reset + capture in one step
 
                         elif event_type == "content_block_delta":
                             delta = event.get("delta", {})
@@ -261,8 +362,25 @@ class AnthropicAdapter(BaseProvider):
                             elif delta_type == "input_json_delta":
                                 tool_input_json += delta.get("partial_json", "")
 
+                            elif delta_type == "thinking_delta":
+                                thinking_buffer += delta.get("thinking", "")
+
+                            elif delta_type == "signature_delta":
+                                thinking_signature = delta.get("signature", "")
+
                         elif event_type == "content_block_stop":
-                            if current_block_type == "tool_use":
+                            if current_block_type == "thinking" and (thinking_buffer or thinking_signature):
+                                yield ContentBlock(
+                                    type=ContentType.THINKING,
+                                    thinking=thinking_buffer,
+                                    thinking_signature=thinking_signature,
+                                )
+                            elif current_block_type == "redacted_thinking" and redacted_thinking_data:
+                                yield ContentBlock(
+                                    type=ContentType.REDACTED_THINKING,
+                                    redacted_thinking_data=redacted_thinking_data,
+                                )
+                            elif current_block_type == "tool_use":
                                 try:
                                     parsed_input = json.loads(tool_input_json) if tool_input_json else {}
                                 except json.JSONDecodeError:
@@ -276,31 +394,27 @@ class AnthropicAdapter(BaseProvider):
                             current_block_type = None
 
                         elif event_type == "message_delta":
-                            # Final usage info
-                            usage = event.get("usage", {})
-                            if usage:
-                                output_t = usage.get("output_tokens", 0)
-                                # Anthropic sends output_tokens in message_delta
-                                # We'll emit a partial usage; full usage comes from message_start
-                                pass  # Handled below in message_stop
+                            # Anthropic sends output_tokens in message_delta
+                            delta_usage = event.get("usage", {})
+                            if delta_usage:
+                                stream_output_tokens = delta_usage.get("output_tokens", 0)
+                                stream_thinking_tokens = delta_usage.get("thinking_input_tokens", 0)
 
                         elif event_type == "message_start":
                             msg = event.get("message", {})
                             msg_usage = msg.get("usage", {})
-                            self._stream_input_tokens = msg_usage.get("input_tokens", 0)
+                            stream_input_tokens = msg_usage.get("input_tokens", 0)
 
                         elif event_type == "message_stop":
                             pass
 
-                    # Emit final usage if we have it
-                    # Anthropic splits usage across message_start and message_delta
-                    # We collect what we can
-                    input_t = getattr(self, "_stream_input_tokens", 0)
-                    # Note: output tokens aren't always available in stream
+                    # Emit final usage — Anthropic splits across
+                    # message_start (input_tokens) and message_delta (output_tokens)
                     yield Usage(
-                        input_tokens=input_t,
-                        output_tokens=0,
-                        total_tokens=input_t,
+                        input_tokens=stream_input_tokens,
+                        output_tokens=stream_output_tokens,
+                        total_tokens=stream_input_tokens + stream_output_tokens,
+                        thinking_tokens=stream_thinking_tokens,
                     )
 
             except httpx.HTTPStatusError as exc:

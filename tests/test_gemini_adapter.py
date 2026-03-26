@@ -204,7 +204,7 @@ class TestGeminiMessageFormat:
         )
 
         sent_body = json.loads(route.calls[0].request.content)
-        assert sent_body["system_instruction"]["parts"][0]["text"] == "You are a helpful assistant"
+        assert sent_body["systemInstruction"]["parts"][0]["text"] == "You are a helpful assistant"
         # System should NOT appear in contents
         for content in sent_body["contents"]:
             for part in content.get("parts", []):

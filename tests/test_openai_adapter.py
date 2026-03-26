@@ -212,3 +212,81 @@ class TestToolResultConversion:
         assert tool_msg["role"] == "tool"
         assert tool_msg["tool_call_id"] == "call_1"
         assert tool_msg["content"] == "72°F and sunny"
+
+
+class TestMultiToolResult:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_multiple_tool_results_flattened(self) -> None:
+        """Each tool result must become a separate message for OpenAI."""
+        route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json=MOCK_CHAT_RESPONSE)
+        )
+
+        from unifai.types import ContentBlock
+
+        adapter = OpenAIAdapter(api_key="test-key")
+        messages = [
+            Message(role=Role.USER, content="Weather in NYC and SF?"),
+            Message(
+                role=Role.ASSISTANT,
+                content=[
+                    ContentBlock(
+                        type=ContentType.TOOL_USE,
+                        tool_call_id="call_1",
+                        tool_name="get_weather",
+                        tool_input={"location": "NYC"},
+                    ),
+                    ContentBlock(
+                        type=ContentType.TOOL_USE,
+                        tool_call_id="call_2",
+                        tool_name="get_weather",
+                        tool_input={"location": "SF"},
+                    ),
+                ],
+            ),
+            Message(
+                role=Role.TOOL,
+                content=[
+                    ContentBlock(
+                        type=ContentType.TOOL_RESULT,
+                        tool_call_id="call_1",
+                        tool_result_content="72°F sunny",
+                    ),
+                    ContentBlock(
+                        type=ContentType.TOOL_RESULT,
+                        tool_call_id="call_2",
+                        tool_result_content="65°F foggy",
+                    ),
+                ],
+            ),
+        ]
+        await adapter.chat(messages=messages, model="gpt-4o")
+
+        sent_body = json.loads(route.calls[0].request.content)
+        # Two separate tool messages instead of one combined
+        tool_msgs = [m for m in sent_body["messages"] if m["role"] == "tool"]
+        assert len(tool_msgs) == 2
+        assert tool_msgs[0]["tool_call_id"] == "call_1"
+        assert tool_msgs[0]["content"] == "72°F sunny"
+        assert tool_msgs[1]["tool_call_id"] == "call_2"
+        assert tool_msgs[1]["content"] == "65°F foggy"
+
+
+class TestMaxCompletionTokens:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_uses_max_completion_tokens(self) -> None:
+        """OpenAI payload should use max_completion_tokens not max_tokens."""
+        route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json=MOCK_CHAT_RESPONSE)
+        )
+
+        adapter = OpenAIAdapter(api_key="test-key")
+        messages = [Message(role=Role.USER, content="Hello")]
+        await adapter.chat(messages=messages, model="gpt-4o", max_tokens=1000)
+
+        sent_body = json.loads(route.calls[0].request.content)
+        assert "max_completion_tokens" in sent_body
+        assert sent_body["max_completion_tokens"] == 1000
+        assert "max_tokens" not in sent_body

@@ -29,8 +29,21 @@ _FINISH_REASON_MAP: dict[str, FinishReason] = {
     "MAX_TOKENS": FinishReason.LENGTH,
     "SAFETY": FinishReason.STOP,
     "RECITATION": FinishReason.STOP,
+    "LANGUAGE": FinishReason.STOP,
     "OTHER": FinishReason.ERROR,
+    "BLOCKLIST": FinishReason.STOP,
+    "PROHIBITED_CONTENT": FinishReason.STOP,
+    "SPII": FinishReason.STOP,
     "MALFORMED_FUNCTION_CALL": FinishReason.ERROR,
+    "UNEXPECTED_TOOL_CALL": FinishReason.ERROR,
+    "TOO_MANY_TOOL_CALLS": FinishReason.ERROR,
+    "MISSING_THOUGHT_SIGNATURE": FinishReason.ERROR,
+    "MALFORMED_RESPONSE": FinishReason.ERROR,
+    "IMAGE_SAFETY": FinishReason.STOP,
+    "IMAGE_PROHIBITED_CONTENT": FinishReason.STOP,
+    "IMAGE_OTHER": FinishReason.ERROR,
+    "NO_IMAGE": FinishReason.ERROR,
+    "IMAGE_RECITATION": FinishReason.STOP,
     "FINISH_REASON_UNSPECIFIED": FinishReason.STOP,
 }
 
@@ -203,7 +216,7 @@ class GeminiAdapter(BaseProvider):
             },
         }
         if system:
-            payload["system_instruction"] = {"parts": [{"text": system}]}
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
         if tools:
             payload["tools"] = self._build_tools(tools)
 
@@ -239,7 +252,7 @@ class GeminiAdapter(BaseProvider):
             },
         }
         if system:
-            payload["system_instruction"] = {"parts": [{"text": system}]}
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
         if tools:
             payload["tools"] = self._build_tools(tools)
 

@@ -22,6 +22,8 @@ class ContentType(str, Enum):
     TEXT = "text"
     TOOL_USE = "tool_use"
     TOOL_RESULT = "tool_result"
+    THINKING = "thinking"
+    REDACTED_THINKING = "redacted_thinking"
 
 
 class FinishReason(str, Enum):
@@ -35,7 +37,7 @@ class FinishReason(str, Enum):
 
 
 class ContentBlock(BaseModel):
-    """A single block of content — text, tool call, or tool result."""
+    """A single block of content — text, tool call, tool result, or thinking."""
 
     type: ContentType
     # TEXT
@@ -46,6 +48,11 @@ class ContentBlock(BaseModel):
     tool_input: dict[str, Any] | None = None
     # TOOL_RESULT
     tool_result_content: str | None = None
+    # THINKING (Anthropic extended thinking)
+    thinking: str | None = None
+    thinking_signature: str | None = None
+    # REDACTED_THINKING (Anthropic safety — opaque encrypted data, must round-trip)
+    redacted_thinking_data: str | None = None
     # Gemini 3 thought signature — opaque pass-through, other providers ignore
     thought_signature: str | None = None
 
@@ -109,6 +116,7 @@ class Usage(BaseModel):
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    thinking_tokens: int = 0  # informational only — already included in output_tokens
 
     @property
     def type(self) -> str:
@@ -146,3 +154,9 @@ class Response(BaseModel):
     def tool_calls(self) -> list[ContentBlock]:
         """Return only TOOL_USE blocks."""
         return [b for b in self.content if b.type == ContentType.TOOL_USE]
+
+    @property
+    def thinking(self) -> str | None:
+        """Return concatenated thinking from all THINKING blocks, or None."""
+        parts = [b.thinking for b in self.content if b.type == ContentType.THINKING and b.thinking]
+        return "".join(parts) if parts else None

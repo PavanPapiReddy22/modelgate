@@ -24,6 +24,7 @@ from .base import BaseProvider
 _FINISH_REASON_MAP: dict[str | None, FinishReason] = {
     "stop": FinishReason.STOP,
     "tool_calls": FinishReason.TOOL_USE,
+    "function_call": FinishReason.TOOL_USE,  # deprecated but still emitted
     "length": FinishReason.LENGTH,
     "content_filter": FinishReason.STOP,
     None: FinishReason.STOP,
@@ -48,36 +49,36 @@ class GenericOpenAIAdapter(BaseProvider):
     def _build_messages(
         self, messages: list[Message], system: str | None
     ) -> list[dict[str, object]]:
-        """Convert canonical Messages to OpenAI message dicts."""
+        """Convert canonical Messages to OpenAI message dicts.
+
+        OpenAI requires one message per tool result, so TOOL messages
+        with multiple blocks are flattened into separate messages.
+        """
         out: list[dict[str, object]] = []
         if system:
             out.append({"role": "system", "content": system})
         for msg in messages:
-            out.append(self._convert_message(msg))
-        return out
-
-    def _convert_message(self, msg: Message) -> dict[str, object]:
-        """Convert a single canonical Message to the OpenAI format."""
-        if isinstance(msg.content, str):
-            return {"role": msg.role.value, "content": msg.content}
-
-        # TOOL role → tool result messages
-        if msg.role == Role.TOOL:
-            # OpenAI expects one message per tool result
-            # Return the first one; caller should handle multiples
-            results: list[dict[str, object]] = []
-            for block in msg.content:
-                results.append(
-                    {
+            if msg.role == Role.TOOL and isinstance(msg.content, list):
+                # Flatten: one message per tool result
+                for block in msg.content:
+                    out.append({
                         "role": "tool",
                         "tool_call_id": block.tool_call_id or "",
                         "content": block.tool_result_content or "",
-                    }
-                )
-            # For a single tool result, return it directly
-            if len(results) == 1:
-                return results[0]
-            return results[0]  # OpenAI expects separate messages per tool result
+                    })
+            else:
+                out.append(self._convert_message(msg))
+        return out
+
+    def _convert_message(self, msg: Message) -> dict[str, object]:
+        """Convert a single canonical Message to the OpenAI format.
+
+        Note: Role.TOOL messages are handled by _build_messages (which
+        flattens multiple tool results into separate messages) and never
+        reach this method.
+        """
+        if isinstance(msg.content, str):
+            return {"role": msg.role.value, "content": msg.content}
 
         # ASSISTANT with tool calls
         tool_use_blocks = [b for b in msg.content if b.type == ContentType.TOOL_USE]
@@ -171,6 +172,8 @@ class GenericOpenAIAdapter(BaseProvider):
         usage_data = data.get("usage", {})
         input_tokens = usage_data.get("prompt_tokens", 0)  # type: ignore[union-attr]
         output_tokens = usage_data.get("completion_tokens", 0)  # type: ignore[union-attr]
+        completion_details = usage_data.get("completion_tokens_details") or {}  # type: ignore[union-attr]
+        reasoning_tokens = completion_details.get("reasoning_tokens", 0)  # type: ignore[union-attr]
 
         return Response(
             id=str(data.get("id", "")),
@@ -180,6 +183,7 @@ class GenericOpenAIAdapter(BaseProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=input_tokens + output_tokens,
+                thinking_tokens=reasoning_tokens,
             ),
             finish_reason=finish_reason,
         )
@@ -199,9 +203,17 @@ class GenericOpenAIAdapter(BaseProvider):
         payload: dict[str, object] = {
             "model": model,
             "messages": self._build_messages(messages, system),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "max_completion_tokens": max_tokens,
         }
+        # o-series reasoning models (o3, o4-mini, etc.) reject temperature — omit it.
+        # Valid reasoning_effort values: none, minimal, low, medium, high, xhigh
+        # (none/xhigh added with gpt-5.1; ignored by non-OpenAI compatible APIs)
+        # "none" means reasoning disabled — temperature is allowed in that case.
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        if not reasoning_effort or reasoning_effort == "none":
+            payload["temperature"] = temperature
         if tools:
             payload["tools"] = self._build_tools(tools)
 
@@ -233,11 +245,16 @@ class GenericOpenAIAdapter(BaseProvider):
         payload: dict[str, object] = {
             "model": model,
             "messages": self._build_messages(messages, system),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "max_completion_tokens": max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        # Same as chat: temperature suppressed for reasoning models, allowed for "none".
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        if not reasoning_effort or reasoning_effort == "none":
+            payload["temperature"] = temperature
         if tools:
             payload["tools"] = self._build_tools(tools)
 
@@ -272,10 +289,13 @@ class GenericOpenAIAdapter(BaseProvider):
                             u = data["usage"]
                             input_t = u.get("prompt_tokens", 0)
                             output_t = u.get("completion_tokens", 0)
+                            details = u.get("completion_tokens_details") or {}
+                            reasoning_t = details.get("reasoning_tokens", 0)
                             yield Usage(
                                 input_tokens=input_t,
                                 output_tokens=output_t,
                                 total_tokens=input_t + output_t,
+                                thinking_tokens=reasoning_t,
                             )
                             continue
 
