@@ -346,6 +346,7 @@ class GenericOpenAIAdapter(BaseProvider):
                             tool_call_buffers.clear()
 
             except httpx.HTTPStatusError as exc:
+                await exc.response.aread()
                 raise map_http_status(exc.response.status_code, exc.response.text) from exc
             except Exception as exc:
                 if isinstance(exc, StreamingError):
