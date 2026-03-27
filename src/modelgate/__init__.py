@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-from modelgate.client import UnifAI, UnifAIConfig
+from modelgate.client import ModelGate, ModelGateConfig
 from modelgate.errors import (
     AuthenticationError,
     BedrockError,
@@ -10,7 +10,7 @@ from modelgate.errors import (
     ProviderError,
     RateLimitError,
     StreamingError,
-    UnifAIError,
+    ModelGateError,
     VertexError,
 )
 from modelgate.types import (
@@ -28,8 +28,8 @@ from modelgate.types import (
 __all__ = [
     "__version__",
     # Client
-    "UnifAI",
-    "UnifAIConfig",
+    "ModelGate",
+    "ModelGateConfig",
     # Types
     "ContentBlock",
     "ContentType",
@@ -41,7 +41,7 @@ __all__ = [
     "ToolParameter",
     "Usage",
     # Errors
-    "UnifAIError",
+    "ModelGateError",
     "AuthenticationError",
     "BedrockError",
     "InvalidRequestError",

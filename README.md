@@ -15,10 +15,10 @@ pip install -e ".[dev]"
 
 ```python
 import asyncio
-from unifai import UnifAI, UnifAIConfig
+from unifai import ModelGate, ModelGateConfig
 
 async def main():
-    client = UnifAI(UnifAIConfig(
+    client = ModelGate(ModelGateConfig(
         openai_api_key="sk-...",
         anthropic_api_key="sk-ant-...",
     ))
@@ -85,10 +85,10 @@ for tc in response.tool_calls:
 
 ## Error Handling
 
-Every adapter catches raw `httpx.HTTPStatusError` and re-raises as a typed `UnifAIError` — provider-specific error formats never leak to your code:
+Every adapter catches raw `httpx.HTTPStatusError` and re-raises as a typed `ModelGateError` — provider-specific error formats never leak to your code:
 
 ```
-UnifAIError
+ModelGateError
 ├── AuthenticationError   # 401 — invalid or missing API key
 ├── RateLimitError        # 429 — provider rate limit exceeded
 ├── InvalidRequestError   # 400 — malformed input
@@ -118,8 +118,8 @@ except AuthenticationError:
 src/unifai/
 ├── __init__.py          # Public API surface
 ├── types.py             # Pydantic v2 canonical schemas
-├── errors.py            # UnifAIError hierarchy
-├── client.py            # UnifAI entry point + provider routing
+├── errors.py            # ModelGateError hierarchy
+├── client.py            # ModelGate entry point + provider routing
 └── providers/
     ├── base.py          # BaseProvider ABC
     ├── openai.py        # OpenAI adapter

@@ -1,4 +1,4 @@
-"""UnifAI client — model string routing and provider management."""
+"""ModelGate client — model string routing and provider management."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from modelgate.types import ContentBlock, Message, Response, Tool, Usage
 from collections.abc import AsyncIterator
 
 
-class UnifAIConfig(BaseModel):
-    """Configuration for UnifAI client."""
+class ModelGateConfig(BaseModel):
+    """Configuration for ModelGate client."""
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
@@ -40,11 +40,11 @@ _PROVIDER_REGISTRY: dict[str, str] = {
 }
 
 
-class UnifAI:
+class ModelGate:
     """Model-agnostic LLM client with provider routing."""
 
-    def __init__(self, config: UnifAIConfig | None = None) -> None:
-        self._config = config or UnifAIConfig()
+    def __init__(self, config: ModelGateConfig | None = None) -> None:
+        self._config = config or ModelGateConfig()
         self._providers: dict[str, Any] = {}
 
     def _parse_model_string(self, model: str) -> tuple[str, str]:
