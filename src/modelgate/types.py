@@ -44,6 +44,8 @@ class FinishReason(str, Enum):
 class ContentBlock(BaseModel):
     """A single block of content — text, tool call, tool result, thinking, image, or document."""
 
+    model_config = {"populate_by_name": True}
+
     type: ContentType
     # TEXT
     text: str | None = None
@@ -69,6 +71,14 @@ class ContentBlock(BaseModel):
     document_media_type: str | None = None  # e.g. "application/pdf"
     document_data: str | None = None  # base64-encoded data or URL string or file_id
     document_filename: str | None = None
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
+
+    def model_dump_json(self, **kwargs: Any) -> str:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump_json(**kwargs)
 
 
 class Message(BaseModel):
@@ -160,6 +170,14 @@ class Response(BaseModel):
     usage: Usage
     finish_reason: FinishReason
     stop_sequence: str | None = None  # the actual stop string that triggered stop_reason
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
+
+    def model_dump_json(self, **kwargs: Any) -> str:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump_json(**kwargs)
 
     @property
     def text(self) -> str | None:
