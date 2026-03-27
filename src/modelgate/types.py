@@ -24,6 +24,9 @@ class ContentType(str, Enum):
     TOOL_RESULT = "tool_result"
     THINKING = "thinking"
     REDACTED_THINKING = "redacted_thinking"
+    IMAGE = "image"
+    DOCUMENT = "document"
+    SERVER_TOOL_USE = "server_tool_use"
 
 
 class FinishReason(str, Enum):
@@ -31,18 +34,20 @@ class FinishReason(str, Enum):
     TOOL_USE = "tool_use"
     LENGTH = "length"
     ERROR = "error"
+    PAUSE_TURN = "pause_turn"
+    REFUSAL = "refusal"
 
 
 # ── Content & Messages ──────────────────────────────────────────────────────
 
 
 class ContentBlock(BaseModel):
-    """A single block of content — text, tool call, tool result, or thinking."""
+    """A single block of content — text, tool call, tool result, thinking, image, or document."""
 
     type: ContentType
     # TEXT
     text: str | None = None
-    # TOOL_USE
+    # TOOL_USE / SERVER_TOOL_USE
     tool_call_id: str | None = None
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
@@ -55,6 +60,15 @@ class ContentBlock(BaseModel):
     redacted_thinking_data: str | None = None
     # Gemini 3 thought signature — opaque pass-through, other providers ignore
     thought_signature: str | None = None
+    # IMAGE — base64 or URL source
+    image_source_type: str | None = None  # "base64" | "url" | "file"
+    image_media_type: str | None = None  # e.g. "image/png", "image/jpeg"
+    image_data: str | None = None  # base64-encoded data or URL string or file_id
+    # DOCUMENT — PDF / text documents
+    document_source_type: str | None = None  # "base64" | "url" | "file"
+    document_media_type: str | None = None  # e.g. "application/pdf"
+    document_data: str | None = None  # base64-encoded data or URL string or file_id
+    document_filename: str | None = None
 
 
 class Message(BaseModel):
@@ -117,6 +131,8 @@ class Usage(BaseModel):
     output_tokens: int
     total_tokens: int
     thinking_tokens: int = 0  # informational only — already included in output_tokens
+    cache_read_input_tokens: int = 0  # tokens read from prompt cache
+    cache_creation_input_tokens: int = 0  # tokens written to prompt cache
 
     @property
     def type(self) -> str:
@@ -143,6 +159,7 @@ class Response(BaseModel):
     content: list[ContentBlock]
     usage: Usage
     finish_reason: FinishReason
+    stop_sequence: str | None = None  # the actual stop string that triggered stop_reason
 
     @property
     def text(self) -> str | None:

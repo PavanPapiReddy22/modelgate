@@ -28,8 +28,8 @@ load_dotenv()
 # ── Path setup ────────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from unifai.providers.generic_openai import GenericOpenAIAdapter
-from unifai.types import (
+from modelgate.providers.generic_openai import GenericOpenAIAdapter
+from modelgate.types import (
     ContentBlock,
     ContentType,
     FinishReason,
@@ -39,7 +39,7 @@ from unifai.types import (
     ToolParameter,
     Usage,
 )
-from unifai.errors import (
+from modelgate.errors import (
     AuthenticationError,
     InvalidRequestError,
     RateLimitError,
@@ -296,7 +296,7 @@ class TestSingleToolUse:
     @pytest.mark.asyncio
     async def test_tool_result_round_trip(self, adapter: GenericOpenAIAdapter):
         """Full tool call → tool result → final answer round trip."""
-        from unifai.types import ContentBlock, ContentType
+        from modelgate.types import ContentBlock, ContentType
 
         # Step 1: get tool call
         resp = await adapter.chat(
@@ -370,7 +370,7 @@ class TestMultipleTools:
     @pytest.mark.asyncio
     async def test_multi_tool_result_round_trip(self, adapter: GenericOpenAIAdapter):
         """Two tool results in one turn must both reach the model."""
-        from unifai.types import ContentBlock, ContentType
+        from modelgate.types import ContentBlock, ContentType
 
         resp = await adapter.chat(
             messages=[user("What's the weather in Tokyo AND Paris? Call both.")],
@@ -590,7 +590,7 @@ class TestMessageFormats:
         Assistant messages that had tool calls have content=None in OpenAI format.
         The adapter sets content=None for these — verify it serializes correctly.
         """
-        from unifai.types import ContentBlock, ContentType
+        from modelgate.types import ContentBlock, ContentType
 
         fake_tool_call_block = ContentBlock(
             type=ContentType.TOOL_USE,

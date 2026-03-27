@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
-from unifai.types import ContentBlock, Message, Response, Tool, Usage
+from modelgate.types import ContentBlock, Message, Response, Tool, Usage
 
 
 class BaseProvider(ABC):

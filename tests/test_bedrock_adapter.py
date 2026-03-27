@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 
-from unifai.types import (
+from modelgate.types import (
     ContentBlock,
     ContentType,
     FinishReason,
@@ -16,7 +16,7 @@ from unifai.types import (
     Tool,
     ToolParameter,
 )
-from unifai.errors import BedrockError
+from modelgate.errors import BedrockError
 
 
 # ── Mock Responses ───────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ def _make_adapter():
     mock_creds.get_frozen_credentials.return_value = mock_frozen
     mock_session.get_credentials.return_value = mock_creds
 
-    from unifai.providers.bedrock import BedrockAdapter
+    from modelgate.providers.bedrock import BedrockAdapter
 
     adapter = BedrockAdapter(region="us-east-1", boto3_session=mock_session)
 

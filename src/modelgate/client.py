@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from unifai.types import ContentBlock, Message, Response, Tool, Usage
+from modelgate.types import ContentBlock, Message, Response, Tool, Usage
 
 from collections.abc import AsyncIterator
 
@@ -67,12 +67,12 @@ class UnifAI:
 
     def _create_provider(self, provider_name: str) -> Any:
         """Create a new provider adapter instance."""
-        from unifai.providers.anthropic import AnthropicAdapter
-        from unifai.providers.bedrock import BedrockAdapter
-        from unifai.providers.gemini import GeminiAdapter
-        from unifai.providers.generic_openai import GenericOpenAIAdapter
-        from unifai.providers.openai import OpenAIAdapter
-        from unifai.providers.vertex import VertexAdapter
+        from modelgate.providers.anthropic import AnthropicAdapter
+        from modelgate.providers.bedrock import BedrockAdapter
+        from modelgate.providers.gemini import GeminiAdapter
+        from modelgate.providers.generic_openai import GenericOpenAIAdapter
+        from modelgate.providers.openai import OpenAIAdapter
+        from modelgate.providers.vertex import VertexAdapter
 
         cfg = self._config
 

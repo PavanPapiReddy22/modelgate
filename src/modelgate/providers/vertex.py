@@ -41,7 +41,7 @@ class VertexAdapter(GeminiAdapter):
                     "Install it with: pip install google-auth"
                 ) from exc
             except Exception as exc:
-                from unifai.errors import VertexError
+                from modelgate.errors import VertexError
 
                 raise VertexError(f"Failed to get default credentials: {exc}") from exc
 
@@ -77,6 +77,6 @@ class VertexAdapter(GeminiAdapter):
 
                 self._credentials.refresh(google.auth.transport.requests.Request())
             except Exception as exc:
-                from unifai.errors import VertexError
+                from modelgate.errors import VertexError
 
                 raise VertexError(f"Failed to refresh credentials: {exc}") from exc

@@ -1,7 +1,9 @@
-"""unifai — model-agnostic adapter layer for LLMs."""
+"""modelgate — model-agnostic adapter layer for LLMs."""
 
-from unifai.client import UnifAI, UnifAIConfig
-from unifai.errors import (
+__version__ = "0.1.0"
+
+from modelgate.client import UnifAI, UnifAIConfig
+from modelgate.errors import (
     AuthenticationError,
     BedrockError,
     InvalidRequestError,
@@ -11,7 +13,7 @@ from unifai.errors import (
     UnifAIError,
     VertexError,
 )
-from unifai.types import (
+from modelgate.types import (
     ContentBlock,
     ContentType,
     FinishReason,
@@ -24,6 +26,7 @@ from unifai.types import (
 )
 
 __all__ = [
+    "__version__",
     # Client
     "UnifAI",
     "UnifAIConfig",

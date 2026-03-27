@@ -1,5 +1,5 @@
 [project]
-name = "unifai"
+name = "modelgate"
 version = "0.1.0"
 description = "Type-safe, zero-SDK adapter layer that normalizes any LLM provider into one consistent interface."
 readme = "README.md"
@@ -13,10 +13,30 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "pydantic>=2.0",
-    "httpx>=0.27",
+    "pydantic>=2.0,<3",
+    "httpx>=0.27,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/PavanPapiReddy22/modelgate"
+Repository = "https://github.com/PavanPapiReddy22/modelgate.git"
+Issues = "https://github.com/PavanPapiReddy22/modelgate/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "respx>=0.22",
+    "python-dotenv>=1.0",
+]
+aws = [
+    "boto3>=1.35",
+]
+vertex = [
+    "google-auth>=2.0",
 ]
 
 [build-system]
@@ -26,18 +46,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "respx>=0.22",
-]
-aws = [
-    "boto3>=1.35",
-]
-vertex = [
-    "google-auth>=2.0",
-]
+[tool.setuptools.package-data]
+modelgate = ["py.typed"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

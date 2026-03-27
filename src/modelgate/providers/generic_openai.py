@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from unifai.errors import StreamingError, map_http_status
-from unifai.types import (
+from modelgate.errors import StreamingError, map_http_status
+from modelgate.types import (
     ContentBlock,
     ContentType,
     FinishReason,

@@ -6,8 +6,8 @@ import httpx
 import pytest
 import respx
 
-from unifai.providers.gemini import GeminiAdapter
-from unifai.types import (
+from modelgate.providers.gemini import GeminiAdapter
+from modelgate.types import (
     ContentBlock,
     ContentType,
     FinishReason,
@@ -16,7 +16,7 @@ from unifai.types import (
     Tool,
     ToolParameter,
 )
-from unifai.errors import AuthenticationError, RateLimitError
+from modelgate.errors import AuthenticationError, RateLimitError
 
 
 # ── Mock Responses ───────────────────────────────────────────────────────────

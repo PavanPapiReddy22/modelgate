@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from unifai.types import (
+from modelgate.types import (
     ContentBlock,
     ContentType,
     FinishReason,
