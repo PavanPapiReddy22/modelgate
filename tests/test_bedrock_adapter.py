@@ -7,6 +7,8 @@ import httpx
 import pytest
 import respx
 
+pytest.importorskip("boto3")
+
 from modelgate.types import (
     ContentBlock,
     ContentType,
