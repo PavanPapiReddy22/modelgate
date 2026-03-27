@@ -1,6 +1,6 @@
 """modelgate — model-agnostic adapter layer for LLMs."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from modelgate.client import ModelGate, ModelGateConfig
 from modelgate.errors import (
