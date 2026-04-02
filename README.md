@@ -1,5 +1,9 @@
 # modelgate
 
+![PyPI version](https://img.shields.io/pypi/v/modelgate)
+![PyPI downloads](https://img.shields.io/pypi/dm/modelgate)
+![License](https://img.shields.io/github/license/PavanPapiReddy22/modelgate)
+
 A lightweight, type-safe adapter layer that gives you one consistent interface across every major LLM provider. No bloated SDKs — just `httpx` and `pydantic` under the hood.
 
 ## Install
@@ -48,6 +52,7 @@ asyncio.run(main())
 | Ollama      | `ollama/`           | `ollama_base_url`      |
 
 Any OpenAI-compatible API works via `GenericOpenAIAdapter` — no new adapter code needed.
+> ⚠️ **AWS Bedrock and Vertex AI adapters are implemented but not yet verified against live APIs. Community testing and feedback welcome — please open an issue if you run into problems.**
 
 ---
 
