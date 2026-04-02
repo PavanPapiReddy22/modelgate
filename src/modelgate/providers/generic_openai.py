@@ -115,7 +115,7 @@ class GenericOpenAIAdapter(BaseProvider):
                 "function": {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": {
+                    "parameters": tool.raw_schema if tool.raw_schema is not None else {
                         "type": "object",
                         "properties": {
                             name: {

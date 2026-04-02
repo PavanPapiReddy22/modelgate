@@ -116,12 +116,18 @@ class Tool(BaseModel):
 
     name: str
     description: str
-    parameters: dict[str, ToolParameter]
+    parameters: dict[str, ToolParameter] = {}
     required: list[str] = []
+    # Full JSON schema — when set, bypasses ToolParameter and is sent directly
+    # to the provider. Use this for complex schemas (nested objects, arrays, etc.)
+    # that ToolParameter cannot express.
+    raw_schema: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate_required_subset(self) -> Tool:
-        """required list must be a subset of parameters keys."""
+        """required list must be a subset of parameters keys (skipped when raw_schema is set)."""
+        if self.raw_schema is not None:
+            return self
         param_keys = set(self.parameters.keys())
         for key in self.required:
             if key not in param_keys:

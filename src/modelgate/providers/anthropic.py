@@ -219,7 +219,7 @@ class AnthropicAdapter(BaseProvider):
             {
                 "name": tool.name,
                 "description": tool.description,
-                "input_schema": {
+                "input_schema": tool.raw_schema if tool.raw_schema is not None else {
                     "type": "object",
                     "properties": {
                         name: {
