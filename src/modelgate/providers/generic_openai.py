@@ -30,6 +30,15 @@ _FINISH_REASON_MAP: dict[str | None, FinishReason] = {
     None: FinishReason.STOP,
 }
 
+# Optional kwargs forwarded verbatim into the API payload.
+_PASSTHROUGH_KWARGS = frozenset({
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
+    "stop",
+    "seed",
+})
+
 
 class GenericOpenAIAdapter(BaseProvider):
     """Adapter for any OpenAI Chat Completions-compatible API."""
@@ -83,6 +92,7 @@ class GenericOpenAIAdapter(BaseProvider):
         # ASSISTANT with tool calls
         tool_use_blocks = [b for b in msg.content if b.type == ContentType.TOOL_USE]
         text_blocks = [b for b in msg.content if b.type == ContentType.TEXT]
+        image_blocks = [b for b in msg.content if b.type == ContentType.IMAGE]
 
         if tool_use_blocks:
             result: dict[str, object] = {"role": msg.role.value}
@@ -103,7 +113,27 @@ class GenericOpenAIAdapter(BaseProvider):
             ]
             return result
 
-        # Plain content blocks
+        # Multimodal content (text + images)
+        if image_blocks:
+            parts: list[dict[str, object]] = []
+            for block in msg.content:
+                if block.type == ContentType.TEXT:
+                    parts.append({"type": "text", "text": block.text or ""})
+                elif block.type == ContentType.IMAGE:
+                    source_type = block.image_source_type or "base64"
+                    if source_type == "url":
+                        url = block.image_data or ""
+                    else:
+                        # base64 → data URI
+                        media = block.image_media_type or "image/png"
+                        url = f"data:{media};base64,{block.image_data or ''}"
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": url},
+                    })
+            return {"role": msg.role.value, "content": parts}
+
+        # Plain text content blocks
         text = "".join(b.text or "" for b in msg.content if b.type == ContentType.TEXT)
         return {"role": msg.role.value, "content": text}
 
@@ -131,6 +161,22 @@ class GenericOpenAIAdapter(BaseProvider):
             }
             for tool in tools
         ]
+
+    def _build_tool_choice(self, tool_choice: object) -> dict[str, object] | str | None:
+        """Convert tool_choice kwarg to OpenAI format.
+
+        Accepts:
+            - str: "none", "auto", "required"
+            - dict: {"type": "function", "function": {"name": "my_tool"}}
+            - None: omit from payload (API default)
+        """
+        if tool_choice is None:
+            return None
+        if isinstance(tool_choice, str):
+            return tool_choice
+        if isinstance(tool_choice, dict):
+            return tool_choice  # type: ignore[return-value]
+        raise ValueError(f"tool_choice must be a str or dict, got {type(tool_choice)}")
 
     def _parse_response(self, data: dict[str, object], model: str) -> Response:
         """Parse an OpenAI Chat Completions response into a canonical Response."""
@@ -186,6 +232,7 @@ class GenericOpenAIAdapter(BaseProvider):
                 thinking_tokens=reasoning_tokens,
             ),
             finish_reason=finish_reason,
+            stop_sequence=str(choice.get("stop_sequence")) if choice.get("stop_sequence") else None,  # type: ignore[union-attr]
         )
 
     # ── Public API ───────────────────────────────────────────────────────
@@ -216,6 +263,23 @@ class GenericOpenAIAdapter(BaseProvider):
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = self._build_tools(tools)
+
+        # Tool choice
+        tool_choice = kwargs.get("tool_choice")
+        tc = self._build_tool_choice(tool_choice)
+        if tc is not None:
+            payload["tool_choice"] = tc
+
+        # Structured output (response_format)
+        response_format = kwargs.get("response_format")
+        if response_format is not None:
+            payload["response_format"] = response_format
+
+        # Pass-through optional kwargs
+        for key in _PASSTHROUGH_KWARGS:
+            value = kwargs.get(key)
+            if value is not None:
+                payload[key] = value
 
         async with httpx.AsyncClient() as client:
             try:
@@ -257,6 +321,23 @@ class GenericOpenAIAdapter(BaseProvider):
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = self._build_tools(tools)
+
+        # Tool choice
+        tool_choice = kwargs.get("tool_choice")
+        tc = self._build_tool_choice(tool_choice)
+        if tc is not None:
+            payload["tool_choice"] = tc
+
+        # Structured output (response_format)
+        response_format = kwargs.get("response_format")
+        if response_format is not None:
+            payload["response_format"] = response_format
+
+        # Pass-through optional kwargs
+        for key in _PASSTHROUGH_KWARGS:
+            value = kwargs.get(key)
+            if value is not None:
+                payload[key] = value
 
         async with httpx.AsyncClient() as client:
             try:
@@ -346,8 +427,12 @@ class GenericOpenAIAdapter(BaseProvider):
                             tool_call_buffers.clear()
 
             except httpx.HTTPStatusError as exc:
-                await exc.response.aread()
-                raise map_http_status(exc.response.status_code, exc.response.text) from exc
+                try:
+                    await exc.response.aread()
+                except Exception:
+                    pass  # stream may already be closed
+                body = exc.response.text if hasattr(exc.response, '_content') else str(exc)
+                raise map_http_status(exc.response.status_code, body) from exc
             except Exception as exc:
                 if isinstance(exc, StreamingError):
                     raise
